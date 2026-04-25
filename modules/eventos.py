@@ -7,6 +7,8 @@ Módulo de Eventos Financieros con CRUD completo.
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime
+import html as _h
+import html as html_lib
 
 from modules.data_connector import (
     load_eventos, append_evento, delete_evento
@@ -72,11 +74,33 @@ def _kpis(df: pd.DataFrame):
 
 # ── Timeline (tarjetas agrupadas por mes) ─────────────────────────────────────
 
+def _make_card(dia, nombre, detalle, estado, bg_card="#ffffff"):
+    bg, fg = STATUS_COLOR.get(estado, ("#F1EFE8", "#5F5E5A"))
+    e_nombre  = _h.escape(str(nombre))
+    e_detalle = _h.escape(str(detalle))
+    e_estado  = _h.escape(str(estado))
+    e_dia     = _h.escape(str(dia))
+    det = (
+        f'<div style="font-size:11px;color:#94a3b8;margin-top:2px;'
+        f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{e_detalle}</div>'
+    ) if detalle else ""
+    return (
+        f'<div style="background:{bg_card};border:0.5px solid #e2e8f0;'
+        f'border-radius:10px;padding:10px 14px;display:flex;align-items:center;'
+        f'gap:12px;margin-bottom:6px;">'
+        f'<div style="min-width:24px;font-size:13px;font-weight:500;color:#94a3b8;'
+        f'text-align:center;flex-shrink:0;">{e_dia}</div>'
+        f'<div style="flex:1;min-width:0;">'
+        f'<div style="font-size:13px;font-weight:500;color:#1e293b;'
+        f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{e_nombre}</div>'
+        f'{det}</div>'
+        f'<span style="background:{bg};color:{fg};font-size:11px;padding:3px 10px;'
+        f'border-radius:99px;white-space:nowrap;flex-shrink:0;">{e_estado}</span>'
+        f'</div>'
+    )
+
+
 def _timeline_chart(df: pd.DataFrame):
-    """
-    Reemplaza el gráfico de dispersión por una lista vertical de tarjetas
-    agrupadas por mes. Sin superposición, legible a cualquier tamaño.
-    """
     if df.empty:
         st.info("No hay eventos para mostrar.")
         return
@@ -88,98 +112,71 @@ def _timeline_chart(df: pd.DataFrame):
         dated["Fecha"] = pd.to_datetime(dated["Fecha"])
         dated = dated.sort_values("Fecha").reset_index(drop=True)
 
-    html = '<div style="display:flex;flex-direction:column;gap:0;padding:4px 0;">'
+    partes = []
 
-    # ── Eventos con fecha, agrupados por mes ──────────────────────────────────
     if not dated.empty:
-        # Calcular grupos y decidir si el conector vertical sigue hacia abajo
-        meses = dated.groupby(
-            dated["Fecha"].dt.to_period("M"), sort=True
-        )
+        meses    = dated.groupby(dated["Fecha"].dt.to_period("M"), sort=True)
         mes_keys = list(meses.groups.keys())
 
         for mi, mes_key in enumerate(mes_keys):
-            grupo = meses.get_group(mes_key).sort_values("Fecha")
-            mes_label = grupo.iloc[0]["Fecha"].strftime("%b %Y").capitalize()
-            es_ultimo_mes = (mi == len(mes_keys) - 1) and undated.empty
+            grupo     = meses.get_group(mes_key).sort_values("Fecha")
+            mes_label = _h.escape(grupo.iloc[0]["Fecha"].strftime("%b %Y").capitalize())
+            es_ultimo = (mi == len(mes_keys) - 1) and undated.empty
+            conector  = "" if es_ultimo else "<div style=\'width:1.5px;flex:1;background:#e2e8f0;min-height:16px;\'></div>"
 
-            html += f'''
-            <div style="display:flex;gap:16px;align-items:flex-start;">
-              <div style="min-width:72px;padding-top:5px;text-align:right;flex-shrink:0;">
-                <span style="font-size:11px;font-weight:500;color:#94a3b8;">{mes_label}</span>
-              </div>
-              <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;">
-                <div style="width:9px;height:9px;border-radius:50%;background:#378ADD;margin-top:5px;flex-shrink:0;"></div>
-                {"" if es_ultimo_mes else "<div style='width:1.5px;flex:1;background:#e2e8f0;min-height:12px;'></div>"}
-              </div>
-              <div style="flex:1;display:flex;flex-direction:column;gap:6px;padding-bottom:14px;min-width:0;">
-            '''
-
+            cards = ""
             for _, row in grupo.iterrows():
                 estado  = str(row.get("Estado", "")).strip()
-                bg, fg  = STATUS_COLOR.get(estado, ("#F1EFE8", "#5F5E5A"))
                 dia     = pd.Timestamp(row["Fecha"]).strftime("%d")
                 nombre  = str(row.get("Nombre del evento", ""))
-                lugar   = str(row.get("Lugar / Modalidad", "") or "").strip()
                 org     = str(row.get("Organizador", "") or "").strip()
+                lugar   = str(row.get("Lugar / Modalidad", "") or "").strip()
                 detalle = " · ".join(filter(None, [org, lugar]))
+                cards  += _make_card(dia, nombre, detalle, estado)
 
-                html += f'''
-                <div style="background:#ffffff;border:0.5px solid #e2e8f0;border-radius:10px;
-                            padding:10px 14px;display:flex;align-items:center;gap:12px;">
-                  <div style="min-width:24px;font-size:13px;font-weight:500;
-                              color:#94a3b8;text-align:center;flex-shrink:0;">{dia}</div>
-                  <div style="flex:1;min-width:0;">
-                    <div style="font-size:13px;font-weight:500;color:#1e293b;
-                                overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
-                         title="{nombre}">{nombre}</div>
-                    {f'<div style="font-size:11px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{detalle}</div>' if detalle else ""}
-                  </div>
-                  <span style="background:{bg};color:{fg};font-size:11px;padding:3px 10px;
-                               border-radius:99px;white-space:nowrap;flex-shrink:0;">{estado}</span>
-                </div>
-                '''
+            partes.append(
+                '<div style="display:flex;gap:16px;align-items:flex-start;">' +
+                '<div style="min-width:72px;padding-top:5px;text-align:right;flex-shrink:0;">' +
+                f'<span style="font-size:11px;font-weight:500;color:#94a3b8;">{mes_label}</span>' +
+                '</div>' +
+                '<div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;">' +
+                '<div style="width:9px;height:9px;border-radius:50%;background:#378ADD;margin-top:5px;flex-shrink:0;"></div>' +
+                conector +
+                '</div>' +
+                '<div style="flex:1;min-width:0;padding-bottom:14px;">' +
+                cards +
+                '</div></div>'
+            )
 
-            html += '</div></div>'
-
-    # ── Eventos sin fecha ─────────────────────────────────────────────────────
     if not undated.empty:
-        html += '''
-        <div style="display:flex;gap:16px;align-items:flex-start;">
-          <div style="min-width:72px;padding-top:5px;text-align:right;flex-shrink:0;">
-            <span style="font-size:11px;font-weight:500;color:#cbd5e1;">Sin fecha</span>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;">
-            <div style="width:9px;height:9px;border-radius:50%;background:#cbd5e1;margin-top:5px;"></div>
-          </div>
-          <div style="flex:1;display:flex;flex-direction:column;gap:6px;padding-bottom:4px;min-width:0;">
-        '''
+        cards = ""
         for _, row in undated.iterrows():
             estado  = str(row.get("Estado", "")).strip()
-            bg, fg  = STATUS_COLOR.get(estado, ("#F1EFE8", "#5F5E5A"))
             nombre  = str(row.get("Nombre del evento", ""))
-            lugar   = str(row.get("Lugar / Modalidad", "") or "").strip()
             org     = str(row.get("Organizador", "") or "").strip()
+            lugar   = str(row.get("Lugar / Modalidad", "") or "").strip()
             detalle = " · ".join(filter(None, [org, lugar]))
+            cards  += _make_card("—", nombre, detalle, estado, bg_card="#f8fafc")
 
-            html += f'''
-            <div style="background:#f8fafc;border:0.5px solid #e2e8f0;border-radius:10px;
-                        padding:10px 14px;display:flex;align-items:center;gap:12px;">
-              <div style="min-width:24px;font-size:13px;color:#cbd5e1;text-align:center;flex-shrink:0;">—</div>
-              <div style="flex:1;min-width:0;">
-                <div style="font-size:13px;font-weight:500;color:#1e293b;
-                            overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
-                     title="{nombre}">{nombre}</div>
-                {f'<div style="font-size:11px;color:#94a3b8;margin-top:2px;">{detalle}</div>' if detalle else ""}
-              </div>
-              <span style="background:{bg};color:{fg};font-size:11px;padding:3px 10px;
-                           border-radius:99px;white-space:nowrap;flex-shrink:0;">{estado}</span>
-            </div>
-            '''
-        html += '</div></div>'
+        partes.append(
+            '<div style="display:flex;gap:16px;align-items:flex-start;">' +
+            '<div style="min-width:72px;padding-top:5px;text-align:right;flex-shrink:0;">' +
+            '<span style="font-size:11px;font-weight:500;color:#cbd5e1;">Sin fecha</span>' +
+            '</div>' +
+            '<div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;">' +
+            '<div style="width:9px;height:9px;border-radius:50%;background:#cbd5e1;margin-top:5px;"></div>' +
+            '</div>' +
+            '<div style="flex:1;min-width:0;padding-bottom:4px;">' +
+            cards +
+            '</div></div>'
+        )
 
-    html += '</div>'
-    st.markdown(html, unsafe_allow_html=True)
+    html_out = (
+        '<div style="display:flex;flex-direction:column;gap:0;padding:4px 0;">' +
+        "".join(partes) +
+        '</div>'
+    )
+    st.markdown(html_out, unsafe_allow_html=True)
 
 
 # ── Tabla de eventos ──────────────────────────────────────────────────────────
