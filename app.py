@@ -135,7 +135,7 @@ def sidebar_nav():
 
         modules = {
             "📅  Eventos Financieros": "eventos",
-            "💳  Marco Normativo":     "normativa",
+            "📜  Marco Normativo":     "normativa",
             "💳  Líneas de Crédito":   "credito",
             "🗓️  Calendario Propio":    "calendario",
             "🗺️  Mapa de Actores":      "actores",
@@ -167,7 +167,7 @@ def main():
     elif page == "credito":
         from modules.coming_soon import render
         render("💳 Líneas de Crédito", "Próximamente podrás gestionar líneas de crédito y sus tasas de interés.", "credito")
-    elif page == "Marco Normativo":
+    elif page == "normativa":
         from modules.normativa import render
     elif page == "calendario":
         from modules.coming_soon import render
