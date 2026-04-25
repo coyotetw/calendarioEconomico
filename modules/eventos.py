@@ -7,22 +7,29 @@ Módulo de Eventos Financieros con CRUD completo.
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime
-import plotly.express as px
-import plotly.graph_objects as go
 
 from modules.data_connector import (
-    load_eventos, append_evento, update_evento, delete_evento
+    load_eventos, append_evento, delete_evento
 )
 
 STATUS_OPTIONS = ["Próximo", "✓ Realizado", "Cancelado", "En curso"]
 
 STATUS_BADGE = {
-    "✓ Realizado": ("badge-done",  "✓ Realizado"),
-    "Próximo":     ("badge-next",  "Próximo"),
-    "En curso":    ("badge-next",  "En curso"),
-    "Cancelado":   ("badge-unknown", "Cancelado"),
+    "✓ Realizado": ("badge-done",   "✓ Realizado"),
+    "Próximo":     ("badge-next",   "Próximo"),
+    "En curso":    ("badge-next",   "En curso"),
+    "Cancelado":   ("badge-unknown","Cancelado"),
 }
 
+STATUS_COLOR = {
+    "✓ Realizado": ("#E1F5EE", "#085041"),
+    "Próximo":     ("#E6F1FB", "#0C447C"),
+    "En curso":    ("#EEEDFE", "#3C3489"),
+    "Cancelado":   ("#F1EFE8", "#5F5E5A"),
+}
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _badge(status: str) -> str:
     cls, label = STATUS_BADGE.get(status, ("badge-unknown", status or "—"))
@@ -37,6 +44,8 @@ def _fmt_date(val) -> str:
     except Exception:
         return str(val)
 
+
+# ── KPI cards ─────────────────────────────────────────────────────────────────
 
 def _kpis(df: pd.DataFrame):
     total      = len(df)
@@ -61,123 +70,146 @@ def _kpis(df: pd.DataFrame):
     st.markdown(html, unsafe_allow_html=True)
 
 
+# ── Timeline (tarjetas agrupadas por mes) ─────────────────────────────────────
+
 def _timeline_chart(df: pd.DataFrame):
     """
-    Reemplaza el gráfico de línea de tiempo por tarjetas agrupadas por mes.
-    Mucho más legible que un scatter plot con etiquetas superpuestas.
+    Reemplaza el gráfico de dispersión por una lista vertical de tarjetas
+    agrupadas por mes. Sin superposición, legible a cualquier tamaño.
     """
-    dated = df[df["Fecha"].notna()].copy()
-    undated = df[df["Fecha"].isna()].copy()
-
-    if dated.empty and undated.empty:
+    if df.empty:
+        st.info("No hay eventos para mostrar.")
         return
 
-    dated["Fecha"] = pd.to_datetime(dated["Fecha"])
-    dated = dated.sort_values("Fecha")
-    dated["Mes"] = dated["Fecha"].dt.strftime("%B %Y").str.capitalize()
+    dated   = df[df["Fecha"].notna()].copy()
+    undated = df[df["Fecha"].isna()].copy()
 
-    STATUS_COLOR = {
-        "✓ Realizado": ("#d1fae5", "#065f46"),   # verde suave
-        "Próximo":     ("#dbeafe", "#1e40af"),   # azul suave
-        "En curso":    ("#ede9fe", "#4c1d95"),   # violeta suave
-        "Cancelado":   ("#f1f5f9", "#475569"),   # gris
-    }
+    if not dated.empty:
+        dated["Fecha"] = pd.to_datetime(dated["Fecha"])
+        dated = dated.sort_values("Fecha").reset_index(drop=True)
 
-    html = '<div style="display:flex;flex-direction:column;gap:12px;padding:4px 0;">'
+    html = '<div style="display:flex;flex-direction:column;gap:0;padding:4px 0;">'
 
     # ── Eventos con fecha, agrupados por mes ──────────────────────────────────
-    for mes, grupo in dated.groupby("Mes", sort=False):
-        html += f'''
-        <div style="display:flex;gap:12px;align-items:flex-start;">
-          <div style="min-width:80px;padding-top:6px;text-align:right;">
-            <span style="font-size:11px;font-weight:500;color:#94a3b8;">{mes}</span>
-          </div>
-          <div style="width:2px;background:#e2e8f0;border-radius:2px;flex-shrink:0;margin-top:8px;"></div>
-          <div style="display:flex;flex-direction:column;gap:6px;flex:1;">
-        '''
-        for _, row in grupo.iterrows():
-            estado = str(row["Estado"]).strip()
-            bg, fg = STATUS_COLOR.get(estado, ("#f1f5f9", "#475569"))
-            dia = pd.Timestamp(row["Fecha"]).strftime("%d")
-            nombre = str(row["Nombre del evento"])
-            lugar = str(row["Lugar / Modalidad"]) if pd.notna(row["Lugar / Modalidad"]) and row["Lugar / Modalidad"] else ""
-            org = str(row["Organizador"]) if pd.notna(row["Organizador"]) and row["Organizador"] else ""
+    if not dated.empty:
+        # Calcular grupos y decidir si el conector vertical sigue hacia abajo
+        meses = dated.groupby(
+            dated["Fecha"].dt.to_period("M"), sort=True
+        )
+        mes_keys = list(meses.groups.keys())
+
+        for mi, mes_key in enumerate(mes_keys):
+            grupo = meses.get_group(mes_key).sort_values("Fecha")
+            mes_label = grupo.iloc[0]["Fecha"].strftime("%b %Y").capitalize()
+            es_ultimo_mes = (mi == len(mes_keys) - 1) and undated.empty
 
             html += f'''
-            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px;">
-              <div style="min-width:28px;text-align:center;font-size:13px;font-weight:500;color:#64748b;">{dia}</div>
-              <div style="flex:1;min-width:0;">
-                <div style="font-size:12px;font-weight:500;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{nombre}</div>
-                {"<div style='font-size:10px;color:#94a3b8;margin-top:1px;'>" + org + (" · " if org and lugar else "") + lugar + "</div>" if org or lugar else ""}
+            <div style="display:flex;gap:16px;align-items:flex-start;">
+              <div style="min-width:72px;padding-top:5px;text-align:right;flex-shrink:0;">
+                <span style="font-size:11px;font-weight:500;color:#94a3b8;">{mes_label}</span>
               </div>
-              <span style="background:{bg};color:{fg};font-size:10px;padding:2px 8px;border-radius:99px;white-space:nowrap;flex-shrink:0;">{estado}</span>
-            </div>
+              <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;">
+                <div style="width:9px;height:9px;border-radius:50%;background:#378ADD;margin-top:5px;flex-shrink:0;"></div>
+                {"" if es_ultimo_mes else "<div style='width:1.5px;flex:1;background:#e2e8f0;min-height:12px;'></div>"}
+              </div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:6px;padding-bottom:14px;min-width:0;">
             '''
-        html += '</div></div>'
+
+            for _, row in grupo.iterrows():
+                estado  = str(row.get("Estado", "")).strip()
+                bg, fg  = STATUS_COLOR.get(estado, ("#F1EFE8", "#5F5E5A"))
+                dia     = pd.Timestamp(row["Fecha"]).strftime("%d")
+                nombre  = str(row.get("Nombre del evento", ""))
+                lugar   = str(row.get("Lugar / Modalidad", "") or "").strip()
+                org     = str(row.get("Organizador", "") or "").strip()
+                detalle = " · ".join(filter(None, [org, lugar]))
+
+                html += f'''
+                <div style="background:#ffffff;border:0.5px solid #e2e8f0;border-radius:10px;
+                            padding:10px 14px;display:flex;align-items:center;gap:12px;">
+                  <div style="min-width:24px;font-size:13px;font-weight:500;
+                              color:#94a3b8;text-align:center;flex-shrink:0;">{dia}</div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="font-size:13px;font-weight:500;color:#1e293b;
+                                overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                         title="{nombre}">{nombre}</div>
+                    {f'<div style="font-size:11px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{detalle}</div>' if detalle else ""}
+                  </div>
+                  <span style="background:{bg};color:{fg};font-size:11px;padding:3px 10px;
+                               border-radius:99px;white-space:nowrap;flex-shrink:0;">{estado}</span>
+                </div>
+                '''
+
+            html += '</div></div>'
 
     # ── Eventos sin fecha ─────────────────────────────────────────────────────
     if not undated.empty:
-        html += f'''
-        <div style="display:flex;gap:12px;align-items:flex-start;">
-          <div style="min-width:80px;padding-top:6px;text-align:right;">
+        html += '''
+        <div style="display:flex;gap:16px;align-items:flex-start;">
+          <div style="min-width:72px;padding-top:5px;text-align:right;flex-shrink:0;">
             <span style="font-size:11px;font-weight:500;color:#cbd5e1;">Sin fecha</span>
           </div>
-          <div style="width:2px;background:#e2e8f0;border-radius:2px;flex-shrink:0;margin-top:8px;"></div>
-          <div style="display:flex;flex-direction:column;gap:6px;flex:1;">
+          <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;">
+            <div style="width:9px;height:9px;border-radius:50%;background:#cbd5e1;margin-top:5px;"></div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:6px;padding-bottom:4px;min-width:0;">
         '''
         for _, row in undated.iterrows():
-            estado = str(row["Estado"]).strip()
-            bg, fg = STATUS_COLOR.get(estado, ("#f1f5f9", "#475569"))
-            nombre = str(row["Nombre del evento"])
-            lugar = str(row["Lugar / Modalidad"]) if pd.notna(row["Lugar / Modalidad"]) and row["Lugar / Modalidad"] else ""
-            org = str(row["Organizador"]) if pd.notna(row["Organizador"]) and row["Organizador"] else ""
+            estado  = str(row.get("Estado", "")).strip()
+            bg, fg  = STATUS_COLOR.get(estado, ("#F1EFE8", "#5F5E5A"))
+            nombre  = str(row.get("Nombre del evento", ""))
+            lugar   = str(row.get("Lugar / Modalidad", "") or "").strip()
+            org     = str(row.get("Organizador", "") or "").strip()
+            detalle = " · ".join(filter(None, [org, lugar]))
 
             html += f'''
-            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px;">
-              <div style="min-width:28px;text-align:center;font-size:13px;color:#cbd5e1;">—</div>
+            <div style="background:#f8fafc;border:0.5px solid #e2e8f0;border-radius:10px;
+                        padding:10px 14px;display:flex;align-items:center;gap:12px;">
+              <div style="min-width:24px;font-size:13px;color:#cbd5e1;text-align:center;flex-shrink:0;">—</div>
               <div style="flex:1;min-width:0;">
-                <div style="font-size:12px;font-weight:500;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{nombre}</div>
-                {"<div style='font-size:10px;color:#94a3b8;margin-top:1px;'>" + org + (" · " if org and lugar else "") + lugar + "</div>" if org or lugar else ""}
+                <div style="font-size:13px;font-weight:500;color:#1e293b;
+                            overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                     title="{nombre}">{nombre}</div>
+                {f'<div style="font-size:11px;color:#94a3b8;margin-top:2px;">{detalle}</div>' if detalle else ""}
               </div>
-              <span style="background:{bg};color:{fg};font-size:10px;padding:2px 8px;border-radius:99px;white-space:nowrap;flex-shrink:0;">{estado}</span>
+              <span style="background:{bg};color:{fg};font-size:11px;padding:3px 10px;
+                           border-radius:99px;white-space:nowrap;flex-shrink:0;">{estado}</span>
             </div>
             '''
         html += '</div></div>'
 
     html += '</div>'
     st.markdown(html, unsafe_allow_html=True)
+
+
+# ── Tabla de eventos ──────────────────────────────────────────────────────────
+
 def _render_table(df: pd.DataFrame, filtered_indices):
-    """Render the events table with action buttons."""
-    if df.empty:
+    """Render the events table with delete button only."""
+    if not filtered_indices:
         st.info("No hay eventos para mostrar con los filtros actuales.")
         return
 
     # Header
-    cols = st.columns([1.2, 3.5, 2, 2, 1.3, 0.8, 0.8])
-    headers = ["Fecha", "Evento", "Organizador", "Lugar", "Estado", "✏️", "🗑️"]
-    for col, h in zip(cols, headers):
+    cols = st.columns([1.2, 3.5, 2, 2, 1.5, 0.8])
+    for col, h in zip(cols, ["Fecha", "Evento", "Organizador", "Lugar", "Estado", "🗑️"]):
         col.markdown(f"**{h}**")
     st.markdown("<hr style='margin:0.3rem 0 0.5rem;border-color:#e2e8f0'>", unsafe_allow_html=True)
 
-    for display_i, real_i in enumerate(filtered_indices):
+    for real_i in filtered_indices:
         row = df.iloc[real_i]
-        c1, c2, c3, c4, c5, c6, c7 = st.columns([1.2, 3.5, 2, 2, 1.3, 0.8, 0.8])
+        c1, c2, c3, c4, c5, c6 = st.columns([1.2, 3.5, 2, 2, 1.5, 0.8])
         c1.markdown(f"<small>{_fmt_date(row['Fecha'])}</small>", unsafe_allow_html=True)
         c2.markdown(f"<small><b>{row['Nombre del evento']}</b></small>", unsafe_allow_html=True)
         c3.markdown(f"<small>{row['Organizador'] or '—'}</small>", unsafe_allow_html=True)
         c4.markdown(f"<small>{row['Lugar / Modalidad'] or '—'}</small>", unsafe_allow_html=True)
         c5.markdown(_badge(str(row["Estado"])), unsafe_allow_html=True)
 
-        if c6.button("✏️", key=f"edit_{real_i}", help="Editar"):
-            st.session_state["edit_idx"]  = real_i
-            st.session_state["show_form"] = "edit"
-            st.rerun()
-
-        if c7.button("🗑️", key=f"del_{real_i}", help="Eliminar"):
+        if c6.button("🗑️", key=f"del_{real_i}", help="Eliminar"):
             st.session_state["confirm_delete"] = real_i
             st.rerun()
 
-    # Confirm delete dialog
+    # Confirmar eliminación
     if "confirm_delete" in st.session_state:
         idx  = st.session_state["confirm_delete"]
         name = df.iloc[idx]["Nombre del evento"]
@@ -186,62 +218,40 @@ def _render_table(df: pd.DataFrame, filtered_indices):
         if col_y.button("✅ Sí, eliminar", key="confirm_yes"):
             ok = delete_evento(idx)
             del st.session_state["confirm_delete"]
-            if ok:
-                st.success("Evento eliminado.")
-            else:
-                st.error("No se pudo eliminar (modo demo o sin credenciales).")
+            st.success("Evento eliminado.") if ok else st.error("No se pudo eliminar (sin credenciales de escritura).")
             st.rerun()
         if col_n.button("❌ Cancelar", key="confirm_no"):
             del st.session_state["confirm_delete"]
             st.rerun()
 
 
-def _event_form(df: pd.DataFrame, mode: str = "new", idx: int = None):
-    """Render create / edit form."""
-    is_edit  = mode == "edit" and idx is not None
-    existing = df.iloc[idx] if is_edit else None
+# ── Formulario de nuevo evento ────────────────────────────────────────────────
 
-    st.markdown(f"#### {'✏️ Editar evento' if is_edit else '➕ Nuevo evento'}")
-
-    def _get(field, default=""):
-        return existing[field] if is_edit and pd.notna(existing[field]) else default
+def _event_form(df: pd.DataFrame):
+    """Formulario solo para agregar nuevos eventos."""
+    st.markdown("#### ➕ Nuevo evento")
 
     with st.form("event_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
-            raw_date = _get("Fecha")
-            try:
-                default_date = pd.Timestamp(raw_date).date() if raw_date and raw_date != "" else None
-            except Exception:
-                default_date = None
-            fecha = st.date_input("📅 Fecha", value=default_date, format="DD/MM/YYYY")
-
+            fecha = st.date_input("📅 Fecha", value=None, format="DD/MM/YYYY")
         with col2:
-            estado = st.selectbox(
-                "🔖 Estado",
-                STATUS_OPTIONS,
-                index=STATUS_OPTIONS.index(_get("Estado", "Próximo"))
-                      if _get("Estado", "Próximo") in STATUS_OPTIONS else 0,
-            )
+            estado = st.selectbox("🔖 Estado", STATUS_OPTIONS, index=0)
 
-        nombre = st.text_input("📌 Nombre del evento *", value=_get("Nombre del evento"), max_chars=200)
+        nombre = st.text_input("📌 Nombre del evento *", max_chars=200)
 
         col3, col4 = st.columns(2)
         with col3:
-            organizador = st.text_input("🏢 Organizador", value=_get("Organizador"), max_chars=120)
+            organizador = st.text_input("🏢 Organizador", max_chars=120)
         with col4:
-            lugar = st.text_input("📍 Lugar / Modalidad", value=_get("Lugar / Modalidad"), max_chars=120)
+            lugar = st.text_input("📍 Lugar / Modalidad", max_chars=120)
 
-        enfoque  = st.text_area("🎯 Enfoque principal", value=_get("Enfoque principal"), height=80, max_chars=500)
-        mas_info = st.text_input("🔗 Más info (URL o referencia)", value=_get("Más info"), max_chars=200)
+        enfoque  = st.text_area("🎯 Enfoque principal", height=80, max_chars=500)
+        mas_info = st.text_input("🔗 Más info (URL o referencia)", max_chars=200)
 
         col_submit, col_cancel = st.columns([1, 3])
-        submitted = col_submit.form_submit_button(
-            "💾 Guardar" if is_edit else "➕ Agregar",
-            type="primary",
-            use_container_width=True,
-        )
-        cancelled = col_cancel.form_submit_button("Cancelar", use_container_width=False)
+        submitted = col_submit.form_submit_button("➕ Agregar", type="primary", use_container_width=True)
+        cancelled = col_cancel.form_submit_button("Cancelar")
 
     if submitted:
         if not nombre.strip():
@@ -257,31 +267,24 @@ def _event_form(df: pd.DataFrame, mode: str = "new", idx: int = None):
             "Más info":          mas_info.strip(),
             "Estado":            estado,
         }
-
-        if is_edit:
-            ok  = update_evento(idx, row)
-            msg = "Evento actualizado." if ok else "No se pudo actualizar (modo demo)."
-        else:
-            ok  = append_evento(row)
-            msg = "Evento agregado." if ok else "No se pudo guardar (modo demo)."
-
+        ok = append_evento(row)
         if ok:
-            st.success(msg)
+            st.success("Evento agregado correctamente.")
         else:
-            st.warning(msg)
+            st.warning("No se pudo guardar (sin credenciales de escritura en Google Sheets).")
 
         st.session_state["show_form"] = None
-        st.session_state["edit_idx"]  = None
         st.rerun()
 
     if cancelled:
         st.session_state["show_form"] = None
-        st.session_state["edit_idx"]  = None
         st.rerun()
 
 
+# ── Render principal ──────────────────────────────────────────────────────────
+
 def render():
-    # ── Page header ───────────────────────────────────────────────────────────
+    # Encabezado
     st.markdown("""
     <div class="page-header">
         <h1>📅 Eventos Financieros</h1>
@@ -289,19 +292,26 @@ def render():
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Load data ─────────────────────────────────────────────────────────────
+    # Cargar datos
     df = load_eventos()
 
-    # ── KPIs ──────────────────────────────────────────────────────────────────
+    # Botón de refresco manual
+    col_ref, _ = st.columns([1, 5])
+    with col_ref:
+        if st.button("🔄 Actualizar datos", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+
+    # KPIs
     _kpis(df)
 
-    # ── Timeline ──────────────────────────────────────────────────────────────
+    # Timeline de tarjetas
     with st.container():
-        st.markdown('<div class="table-wrapper"><div class="table-title">📈 Línea de tiempo</div>', unsafe_allow_html=True)
+        st.markdown('<div class="table-wrapper"><div class="table-title">📅 Calendario de eventos</div>', unsafe_allow_html=True)
         _timeline_chart(df)
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # ── Filters + Actions bar ─────────────────────────────────────────────────
+    # Filtros + botón nuevo evento
     st.markdown('<div class="table-wrapper">', unsafe_allow_html=True)
 
     f1, f2, f3, _, btn_col = st.columns([2, 1.5, 1.5, 0.5, 1.5])
@@ -310,25 +320,24 @@ def render():
     with f2:
         status_filter = st.multiselect(
             "Estado",
-            options=STATUS_OPTIONS + [""],
+            options=STATUS_OPTIONS,
             default=[],
             placeholder="Todos los estados",
             label_visibility="collapsed",
         )
     with f3:
         year_options = ["Todos los años"]
-        dated = df[df["Fecha"].notna()]
-        if not dated.empty:
-            years = sorted(pd.to_datetime(dated["Fecha"]).dt.year.unique(), reverse=True)
+        dated_df = df[df["Fecha"].notna()]
+        if not dated_df.empty:
+            years = sorted(pd.to_datetime(dated_df["Fecha"]).dt.year.unique(), reverse=True)
             year_options += [str(y) for y in years]
         year_filter = st.selectbox("Año", year_options, label_visibility="collapsed")
     with btn_col:
         if st.button("➕ Nuevo evento", type="primary", use_container_width=True):
             st.session_state["show_form"] = "new"
-            st.session_state["edit_idx"]  = None
             st.rerun()
 
-    # ── Apply filters ─────────────────────────────────────────────────────────
+    # Aplicar filtros
     mask = pd.Series([True] * len(df), index=df.index)
     if search:
         q = search.lower()
@@ -340,11 +349,14 @@ def render():
     if status_filter:
         mask &= df["Estado"].isin(status_filter)
     if year_filter != "Todos los años":
-        mask &= pd.to_datetime(df["Fecha"], errors="coerce").dt.year.astype("Int64").astype(str) == year_filter
+        mask &= (
+            pd.to_datetime(df["Fecha"], errors="coerce")
+            .dt.year.astype("Int64").astype(str) == year_filter
+        )
 
     filtered_indices = list(df[mask].index)
 
-    # ── Table ─────────────────────────────────────────────────────────────────
+    # Tabla
     st.markdown(
         f"<div class='table-title'>📋 Eventos "
         f"<span style='font-weight:400;color:#64748b;'>({len(filtered_indices)} registros)</span></div>",
@@ -353,17 +365,14 @@ def render():
     _render_table(df, filtered_indices)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ── CRUD Form ─────────────────────────────────────────────────────────────
-    show_form = st.session_state.get("show_form")
-    edit_idx  = st.session_state.get("edit_idx")
-
-    if show_form:
+    # Formulario de nuevo evento
+    if st.session_state.get("show_form") == "new":
         st.markdown("---")
         st.markdown('<div class="form-panel">', unsafe_allow_html=True)
-        _event_form(df, mode=show_form, idx=edit_idx)
+        _event_form(df)
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # ── Credentials notice ────────────────────────────────────────────────────
+    # Info de configuración
     with st.expander("ℹ️ Configuración de conexión a Google Sheets"):
         st.markdown("""
 **Para habilitar escritura en Google Sheets**, agregá tus credenciales en `.streamlit/secrets.toml`:
@@ -380,5 +389,5 @@ token_uri = "https://oauth2.googleapis.com/token"
 ```
 
 Y compartí la hoja de cálculo con el `client_email` como **Editor**.  
-Sin credenciales, la app opera en **modo demo** (lectura pública, sin escritura).
+Sin credenciales, la app opera en **modo lectura** (sin escritura).
         """)
