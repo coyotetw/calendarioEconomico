@@ -136,6 +136,7 @@ def sidebar_nav():
         modules = {
             "📅  Eventos Financieros": "eventos",
             "💳  Líneas de Crédito":   "credito",
+            "💳  Marco Normativo":     "normativa",
             "🗓️  Calendario Propio":    "calendario",
             "🗺️  Mapa de Actores":      "actores",
         }
