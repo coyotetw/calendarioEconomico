@@ -167,6 +167,8 @@ def main():
     elif page == "credito":
         from modules.coming_soon import render
         render("💳 Líneas de Crédito", "Próximamente podrás gestionar líneas de crédito y sus tasas de interés.", "credito")
+    elif page == "Marco Normativo":
+        from modules.normativa import render
     elif page == "calendario":
         from modules.coming_soon import render
         render("🗓️ Calendario Propio", "Aquí irá el calendario de eventos propios que tenés que atender.", "calendario")
