@@ -63,156 +63,89 @@ def _kpis(df: pd.DataFrame):
 
 def _timeline_chart(df: pd.DataFrame):
     """
-    Timeline sin superposición de etiquetas.
-    Los eventos se distribuyen en filas (lanes) según proximidad de fecha.
-    Los eventos sin fecha aparecen como anotaciones al pie.
+    Reemplaza el gráfico de línea de tiempo por tarjetas agrupadas por mes.
+    Mucho más legible que un scatter plot con etiquetas superpuestas.
     """
     dated = df[df["Fecha"].notna()].copy()
     undated = df[df["Fecha"].isna()].copy()
 
-    color_map = {
-        "✓ Realizado": "#1D9E75",
-        "Próximo":     "#378ADD",
-        "En curso":    "#7F77DD",
-        "Cancelado":   "#9ca3af",
+    if dated.empty and undated.empty:
+        return
+
+    dated["Fecha"] = pd.to_datetime(dated["Fecha"])
+    dated = dated.sort_values("Fecha")
+    dated["Mes"] = dated["Fecha"].dt.strftime("%B %Y").str.capitalize()
+
+    STATUS_COLOR = {
+        "✓ Realizado": ("#d1fae5", "#065f46"),   # verde suave
+        "Próximo":     ("#dbeafe", "#1e40af"),   # azul suave
+        "En curso":    ("#ede9fe", "#4c1d95"),   # violeta suave
+        "Cancelado":   ("#f1f5f9", "#475569"),   # gris
     }
 
-    fig = go.Figure()
+    html = '<div style="display:flex;flex-direction:column;gap:12px;padding:4px 0;">'
 
-    if not dated.empty:
-        dated["Fecha"] = pd.to_datetime(dated["Fecha"])
-        dated = dated.sort_values("Fecha").reset_index(drop=True)
-        dated["Fecha_str"] = dated["Fecha"].dt.strftime("%d/%m/%Y")
-        dated["Nombre_corto"] = dated["Nombre del evento"].str[:40] + "…"
+    # ── Eventos con fecha, agrupados por mes ──────────────────────────────────
+    for mes, grupo in dated.groupby("Mes", sort=False):
+        html += f'''
+        <div style="display:flex;gap:12px;align-items:flex-start;">
+          <div style="min-width:80px;padding-top:6px;text-align:right;">
+            <span style="font-size:11px;font-weight:500;color:#94a3b8;">{mes}</span>
+          </div>
+          <div style="width:2px;background:#e2e8f0;border-radius:2px;flex-shrink:0;margin-top:8px;"></div>
+          <div style="display:flex;flex-direction:column;gap:6px;flex:1;">
+        '''
+        for _, row in grupo.iterrows():
+            estado = str(row["Estado"]).strip()
+            bg, fg = STATUS_COLOR.get(estado, ("#f1f5f9", "#475569"))
+            dia = pd.Timestamp(row["Fecha"]).strftime("%d")
+            nombre = str(row["Nombre del evento"])
+            lugar = str(row["Lugar / Modalidad"]) if pd.notna(row["Lugar / Modalidad"]) and row["Lugar / Modalidad"] else ""
+            org = str(row["Organizador"]) if pd.notna(row["Organizador"]) and row["Organizador"] else ""
 
-        # ── Asignar lanes (filas) para evitar superposición ──────────────────
-        # Umbral: dos eventos chocan si su diferencia en días es < MIN_GAP_DAYS
-        MIN_GAP_DAYS = 18
-        lane_last_date = []   # última fecha usada en cada lane
+            html += f'''
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px;">
+              <div style="min-width:28px;text-align:center;font-size:13px;font-weight:500;color:#64748b;">{dia}</div>
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:12px;font-weight:500;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{nombre}</div>
+                {"<div style='font-size:10px;color:#94a3b8;margin-top:1px;'>" + org + (" · " if org and lugar else "") + lugar + "</div>" if org or lugar else ""}
+              </div>
+              <span style="background:{bg};color:{fg};font-size:10px;padding:2px 8px;border-radius:99px;white-space:nowrap;flex-shrink:0;">{estado}</span>
+            </div>
+            '''
+        html += '</div></div>'
 
-        lanes = []
-        for _, row in dated.iterrows():
-            assigned = False
-            for li, last in enumerate(lane_last_date):
-                if (row["Fecha"] - last).days >= MIN_GAP_DAYS:
-                    lanes.append(li)
-                    lane_last_date[li] = row["Fecha"]
-                    assigned = True
-                    break
-            if not assigned:
-                lanes.append(len(lane_last_date))
-                lane_last_date.append(row["Fecha"])
-
-        dated["Lane"] = lanes
-        n_lanes = dated["Lane"].max() + 1
-
-        # ── Una traza por estado (para leyenda) ──────────────────────────────
-        for estado, group in dated.groupby("Estado"):
-            fig.add_trace(go.Scatter(
-                x=group["Fecha"],
-                y=group["Lane"],
-                mode="markers+text",
-                marker=dict(
-                    size=14,
-                    color=color_map.get(estado, "#9ca3af"),
-                    symbol="circle",
-                    line=dict(width=1.5, color="white"),
-                ),
-                text=group["Nombre_corto"],
-                textposition=[
-                    "top center" if lane % 2 == 0 else "bottom center"
-                    for lane in group["Lane"]
-                ],
-                textfont=dict(size=9, color="#475569"),
-                name=estado,
-                hovertemplate=(
-                    "<b>%{customdata[0]}</b><br>"
-                    "📅 %{customdata[1]}<br>"
-                    "🏢 %{customdata[2]}<br>"
-                    "📍 %{customdata[3]}<br>"
-                    "<extra></extra>"
-                ),
-                customdata=list(zip(
-                    group["Nombre del evento"],
-                    group["Fecha_str"],
-                    group["Organizador"].fillna("—"),
-                    group["Lugar / Modalidad"].fillna("—"),
-                )),
-            ))
-
-        # ── Línea de eje horizontal ───────────────────────────────────────────
-        fig.add_hline(
-            y=-0.5,
-            line=dict(color="#e2e8f0", width=1.5),
-            layer="below",
-        )
-
-        # ── Líneas verticales tenues desde punto al eje ───────────────────────
-        for _, row in dated.iterrows():
-            fig.add_shape(
-                type="line",
-                x0=row["Fecha"], x1=row["Fecha"],
-                y0=-0.5, y1=row["Lane"],
-                line=dict(color="#e2e8f0", width=1, dash="dot"),
-                layer="below",
-            )
-
-        yaxis_range = [-0.8, n_lanes + 0.5]
-    else:
-        yaxis_range = [-1, 1]
-
-    # ── Eventos sin fecha como anotaciones ────────────────────────────────────
-    annotations = []
+    # ── Eventos sin fecha ─────────────────────────────────────────────────────
     if not undated.empty:
-        for i, (_, row) in enumerate(undated.iterrows()):
-            annotations.append(dict(
-                x=0.01,
-                y=-0.05 - i * 0.045,
-                xref="paper", yref="paper",
-                text=f"● {row['Nombre del evento'][:55]}… <i>(fecha a confirmar)</i>",
-                showarrow=False,
-                font=dict(size=9, color="#94a3b8"),
-                xanchor="left",
-                yanchor="top",
-            ))
+        html += f'''
+        <div style="display:flex;gap:12px;align-items:flex-start;">
+          <div style="min-width:80px;padding-top:6px;text-align:right;">
+            <span style="font-size:11px;font-weight:500;color:#cbd5e1;">Sin fecha</span>
+          </div>
+          <div style="width:2px;background:#e2e8f0;border-radius:2px;flex-shrink:0;margin-top:8px;"></div>
+          <div style="display:flex;flex-direction:column;gap:6px;flex:1;">
+        '''
+        for _, row in undated.iterrows():
+            estado = str(row["Estado"]).strip()
+            bg, fg = STATUS_COLOR.get(estado, ("#f1f5f9", "#475569"))
+            nombre = str(row["Nombre del evento"])
+            lugar = str(row["Lugar / Modalidad"]) if pd.notna(row["Lugar / Modalidad"]) and row["Lugar / Modalidad"] else ""
+            org = str(row["Organizador"]) if pd.notna(row["Organizador"]) and row["Organizador"] else ""
 
-    height = max(220, 160 + (dated["Lane"].max() + 1 if not dated.empty else 1) * 60)
-    if not undated.empty:
-        height += len(undated) * 18
+            html += f'''
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px;">
+              <div style="min-width:28px;text-align:center;font-size:13px;color:#cbd5e1;">—</div>
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:12px;font-weight:500;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{nombre}</div>
+                {"<div style='font-size:10px;color:#94a3b8;margin-top:1px;'>" + org + (" · " if org and lugar else "") + lugar + "</div>" if org or lugar else ""}
+              </div>
+              <span style="background:{bg};color:{fg};font-size:10px;padding:2px 8px;border-radius:99px;white-space:nowrap;flex-shrink:0;">{estado}</span>
+            </div>
+            '''
+        html += '</div></div>'
 
-    fig.update_layout(
-        height=height,
-        margin=dict(l=10, r=10, t=10, b=10 + len(undated) * 18),
-        paper_bgcolor="white",
-        plot_bgcolor="white",
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            y=1.08, x=0,
-            xanchor="left",
-            font=dict(size=11),
-            bgcolor="rgba(0,0,0,0)",
-        ),
-        xaxis=dict(
-            showgrid=True,
-            gridcolor="#f1f5f9",
-            tickformat="%b %Y",
-            tickfont=dict(size=10, color="#94a3b8"),
-            zeroline=False,
-        ),
-        yaxis=dict(
-            showgrid=False,
-            showticklabels=False,
-            zeroline=False,
-            range=yaxis_range,
-        ),
-        font=dict(family="Inter, sans-serif"),
-        annotations=annotations,
-        hovermode="closest",
-    )
-
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-
+    html += '</div>'
+    st.markdown(html, unsafe_allow_html=True)
 def _render_table(df: pd.DataFrame, filtered_indices):
     """Render the events table with action buttons."""
     if df.empty:
